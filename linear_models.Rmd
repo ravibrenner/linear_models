@@ -23,7 +23,177 @@ nyc_airbnb =
     borough = neighbourhood_group,
     neighborhood = neighbourhood) |> 
   filter(borough != "Staten Island") |> 
-  select(price, stars, borough, neighborhood, room_type)
+  select(price, stars, borough, neighborhood, room_type) |>
+  mutate(borough = fct_infreq(borough),
+         room_type = fct_infreq(room_type))
+```
+
+## Fit some models
+
+Basic linear model fit
+```{r}
+fit = lm(price ~ stars, data = nyc_airbnb)
+
+summary(fit)
+
+names(summary(fit))
+
+coef(fit)
+
+fit |>
+  broom::tidy() |>
+  select(term, estimate, p.value)
+
+fit |>
+  broom::glance()
+```
+
+Try a bit more complex model
+```{r}
+fit <- lm(price ~ stars + borough, data = nyc_airbnb)
+
+fit |> 
+  broom::tidy() |>
+  select(term, estimate, p.value) |>
+  mutate(term = str_replace(term,"borough", "Borough: ")) |>
+  knitr::kable(digits = 3)
+```
+
+
+## Some diagnostics
+
+(backtrack to some EDA)
+```{r}
+nyc_airbnb |>
+  ggplot(aes(x = stars, y = price)) + 
+  geom_point() + 
+  stat_smooth(method ="lm")
+```
+
+
+Most diagnostics use residuals
+
+```{r}
+modelr::add_residuals(nyc_airbnb, fit) |>
+  ggplot(aes(x = borough, y = resid)) + 
+  geom_violin() +
+  ylim(-200,500)
+```
+
+(Some issues here. Highly skewed residuals, nonconstant variance by bourough. May be violating some model assumptions).
+
+Residuals against stars
+```{r}
+modelr::add_residuals(nyc_airbnb, fit) |>
+  ggplot(aes(x = stars, y = resid)) + 
+  geom_point() 
+```
+
+
+Residuals against fitted values
+```{r}
+nyc_airbnb |>
+  modelr::add_residuals(fit) |>
+  modelr::add_predictions(fit) |>
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point()
+```
+
+## comparing models
+```{r}
+fit_null = lm(price ~ stars + borough, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
+```
+
+```{r}
+fit_null |>
+  broom::tidy()
+
+fit_alt |>
+  broom::tidy()
+
+anova(fit_null, fit_alt) |> 
+  broom::tidy()
+```
+
+## Do effects differ across bouroughs?
+
+First, could use a lot of interactions
+```{r}
+nyc_airbnb |>
+  lm(price ~ stars * borough + room_type * borough, data = _) |>
+  broom::tidy()
+```
+
+Could just fit separate models
+```{r}
+nyc_airbnb |>
+  filter(borough == "Manhattan") |> 
+  lm(price ~ stars + room_type, data = _) |>
+  broom::tidy()
+
+nyc_airbnb |>
+  filter(borough == "Brooklyn") |> 
+  lm(price ~ stars + room_type, data = _) |>
+  broom::tidy()
+```
+
+Get fancy and use list columns
+```{r}
+nyc_airbnb |>
+  nest(data = -borough) |>
+  mutate(
+    model = map(data, \(x) lm(price ~ stars + room_type, data = x)),
+    results = map(model, broom::tidy)
+    ) |>
+  unnest(results) |>
+  select(borough, term, estimate) |>
+  pivot_wider(names_from = term,
+              values_from = estimate)
+```
+
+What about room type across manhattan neighborhoods?
+
+```{r}
+nyc_airbnb |>
+  filter(borough == "Manhattan",
+         neighborhood == "Chinatown") |>
+  lm(price ~ stars + room_type, data = _) |>
+  broom::tidy() 
+
+nyc_airbnb |>
+  filter(borough == "Manhattan",
+         neighborhood == "Chelsea") |>
+  lm(price ~ stars + room_type, data = _) |>
+  broom::tidy() 
+```
+
+But can do this systematically for all neighborhoods
+```{r}
+manhattan_neighborhood_fit_df <- nyc_airbnb |>
+  filter(borough == "Manhattan") |>
+  nest(data = -c(borough, neighborhood)) |>
+  mutate(model = map(data, \(x) lm(price ~ stars + room_type, data = x)),
+         results = map(model, broom::tidy)) |>
+  select(neighborhood, results) |>
+  unnest(results) 
+```
+
+Look at effect of room type
+```{r}
+manhattan_neighborhood_fit_df |>
+  filter(str_detect(term, "room_type")) |>
+  ggplot(aes(x = term, y = estimate)) + 
+  geom_boxplot()
+```
+
+```{r}
+manhattan_neighborhood_fit_df |>
+  filter(str_detect(term, "room_type"),
+         estimate > 0) 
+
+nyc_airbnb |> filter(neighborhood == "NoHo",
+                     room_type == "Shared room")
 ```
 
 
