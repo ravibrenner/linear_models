@@ -103,3 +103,51 @@ rmse(wiggly_mod, test_df)
 ```
 
     ## [1] 0.08848557
+
+## repeat the train/test split
+
+``` r
+cv_df <- 
+  crossv_mc(lidar_df, 100) |>
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+```
+
+``` r
+cv_df |>
+  pull(train) |>
+  nth(4) 
+```
+
+Fit models, extrans RMSEs
+
+``` r
+cv_res_df <- cv_df |>
+  mutate(
+    linear_mod = map(train, \(x) lm(logratio ~ range, data = x)),
+    smooth_mod = map(train, \(x) gam(logratio ~ s(range), data = x)),
+    wiggly_mod = map(train, \(x) gam(logratio ~ s(range, k=30), sp = 10e-6, data = x))
+    ) |>
+  mutate(
+    rmse_linear = map2_dbl(linear_mod, test, rmse),
+    rmse_smooth = map2_dbl(smooth_mod, test, rmse),
+    rmse_wiggly = map2_dbl(wiggly_mod, test, rmse)
+  )
+```
+
+Look at RMSE distribution
+
+``` r
+cv_res_df |>
+  select(starts_with("rmse")) |>
+  pivot_longer(everything(),
+               names_to = "model",
+               values_to = "rmse",
+               names_prefix = "rmse_") |>
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
+```
+
+![](cross_validation_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
