@@ -184,5 +184,6 @@ boot_results |>
             boot_se = sd(estimate),
             boot_ci_ll = quantile(estimate, 0.025),
             boot_ci_ul = quantile(estimate, 0.975))
+
 ```
 
